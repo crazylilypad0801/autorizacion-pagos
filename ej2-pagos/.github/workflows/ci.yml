@@ -1,0 +1,13 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose up -d --build
+      - name: Smoke test
+        run: |
+          for i in $(seq 1 20); do curl -fs localhost:8000/api/health && exit 0; sleep 2; done
+          docker compose logs; exit 1
+      - run: docker compose down -v

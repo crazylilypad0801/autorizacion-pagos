@@ -1,0 +1,56 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Autorización de pagos</title>
+<style>
+:root{--b:#4f46e5;--bg:#f4f5fb;--t:#1e1b4b;--m:#6b7280;--e:#dc2626}
+*{box-sizing:border-box}body{margin:0;font:15px system-ui,sans-serif;background:var(--bg);color:var(--t)}
+header{background:linear-gradient(135deg,#0f766e,#4f46e5);color:#fff;padding:22px 32px}header h1{margin:0;font-size:22px}header p{margin:4px 0 0;opacity:.85}
+main{max-width:1150px;margin:auto;padding:24px;display:grid;gap:20px}
+.card{background:#fff;border-radius:14px;padding:18px;box-shadow:0 2px 10px #0001;overflow-x:auto}.card h2{margin:0 0 12px;font-size:16px}
+.grid{display:grid;gap:20px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+label{display:block;font-size:13px;color:var(--m);margin:10px 0 4px}
+input,select{padding:9px;border:1px solid #d1d5db;border-radius:8px;font:inherit;width:100%}
+button{background:var(--b);color:#fff;border:0;border-radius:8px;padding:9px 14px;cursor:pointer;font:inherit;margin:12px 6px 0 0}button.g{background:#e5e7eb;color:var(--t)}button:disabled{opacity:.5}
+.pill{padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600}.ok{background:#dcfce7;color:#166534}.w{background:#fef3c7;color:#92400e}.e{background:#fee2e2;color:#991b1b}.i{background:#e0e7ff;color:#3730a3}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px;border-bottom:1px solid #eee;font-size:13px}
+#res{margin-top:14px;font-size:15px;line-height:1.5}
+</style></head><body>
+<header><h1>💳 Autorización de pagos</h1><p>Cooperativa · idempotencia, límites, auditoría y conciliación</p></header>
+<main>
+<div class="grid">
+ <div class="card"><h2>Solicitud de pago (app móvil)</h2>
+  <label>Cuenta (001-123 o 001-456)</label><input id="acc" value="001-123">
+  <label>Monto (USD) · límite por pago $300, diario $500</label><input id="amt" type="number" value="120">
+  <label>Idempotency-Key (la app la genera por cada intención de pago)</label><input id="key">
+  <label>Banco externo (simulado)</label>
+  <select id="mode" onchange="setBank()"><option value="ok">Responde rápido</option><option value="slow">Responde tarde (4.5 s; timeout de 2 s)</option><option value="down">No responde (error)</option></select>
+  <button id="btn" onclick="pay()">Pagar</button><button class="g" onclick="newKey()">Nueva clave</button><button class="g" onclick="recon()">Ejecutar conciliación</button><button class="g" onclick="reset()">Reiniciar demo</button>
+  <div id="res">Tip: pulsa "Pagar" dos veces con la misma clave y verifica que no se cobra de nuevo.</div></div>
+ <div class="card"><h2>Saldos</h2><div id="bal"></div><h2 style="margin-top:16px">Indicadores</h2><div id="kpis"></div></div>
+</div>
+<div class="card"><h2>Pagos</h2><div id="pays"></div></div>
+<div class="card"><h2>Auditoría (append-only)</h2><div id="aud"></div></div>
+</main>
+<script>
+const $=i=>document.getElementById(i);
+const newKey=()=>{$('key').value=crypto.randomUUID()};newKey();
+async function api(p,m='GET',b,h={}){const r=await fetch('/api/'+p,{method:m,headers:{'Content-Type':'application/json',...h},body:b?JSON.stringify(b):undefined});return {code:r.status,d:await r.json()}}
+const cls=s=>({APROBADO:'ok',PENDIENTE_CONCILIACION:'w',PROCESANDO:'i',RECHAZADO:'e',FALLIDO:'e',CONCILIADO:'ok',REINTENTO:'i'}[s]||'i');
+async function pay(){
+ $('btn').disabled=true;$('res').textContent='Procesando…';
+ const {code,d}=await api('pay','POST',{account:$('acc').value.trim(),amount:Number($('amt').value)},{'Idempotency-Key':$('key').value});
+ $('res').innerHTML=d.error?`<span class="pill e">HTTP ${code}</span> ${d.error}`:`<span class="pill ${cls(d.status)}">${d.status}</span> HTTP ${code} · ${d.detail||''}${d.replay?'<br><b>♻ Reintento detectado: se devolvió el resultado guardado y NO se cobró de nuevo.</b>':''}`;
+ $('btn').disabled=false;load();
+}
+async function setBank(){await api('bank','POST',{mode:$('mode').value})}
+async function recon(){const r=await api('reconcile','POST');$('res').textContent='Conciliación ejecutada: '+r.d.revisados+' pago(s) revisado(s).';load()}
+async function reset(){await api('reset','POST');newKey();$('res').textContent='Demo reiniciada.';load()}
+async function load(){
+ const [a,p,au,m]=await Promise.all(['accounts','payments','audit','metrics'].map(x=>api(x)));
+ $('bal').innerHTML='<table>'+a.d.map(x=>`<tr><td>${x.id} ${x.name}</td><td>$${x.balance.toFixed(2)}</td><td>hoy: $${x.spent_today.toFixed(2)}</td></tr>`).join('')+'</table>';
+ $('pays').innerHTML='<table><tr><th>#</th><th>Clave</th><th>Cuenta</th><th>Monto</th><th>Estado</th><th>Detalle</th><th>Ref banco</th><th>ms</th></tr>'+p.d.map(x=>`<tr><td>${x.id}</td><td>${x.idem_key.slice(0,8)}</td><td>${x.account}</td><td>$${x.amount}</td><td><span class="pill ${cls(x.status)}">${x.status}</span></td><td>${x.detail||''}</td><td>${x.bank_ref||''}</td><td>${x.latency_ms??''}</td></tr>`).join('')+'</table>';
+ $('aud').innerHTML='<table><tr><th>Hora</th><th>Clave</th><th>Evento</th><th>Detalle</th></tr>'+au.d.map(x=>`<tr><td>${x.ts}</td><td>${x.idem_key}</td><td><span class="pill ${cls(x.event)}">${x.event}</span></td><td>${x.detail}</td></tr>`).join('')+'</table>';
+ const M=m.d,L={pagos_totales:'Pagos totales',pagos_duplicados:'Pagos duplicados (meta 0)',reintentos_bloqueados:'Reintentos bloqueados',latencia_p95_ms:'Latencia p95 (ms)',tasa_errores_pct:'Tasa de errores (%)',tiempo_conciliacion_s:'Tiempo de conciliación (s)',pendientes_conciliacion:'Pendientes de conciliar'};
+ $('kpis').innerHTML='<table>'+Object.keys(L).map(k=>`<tr><td>${L[k]}</td><td><b>${M[k]==null?'—':M[k]}</b></td></tr>`).join('')+'</table>';
+}
+load();
+</script></body></html>

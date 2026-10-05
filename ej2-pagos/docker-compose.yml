@@ -1,0 +1,11 @@
+services:
+  app:
+    build: .
+    container_name: ej2-pagos
+    ports:
+      - "8000:8000"
+    volumes:
+      - datos:/data
+    restart: unless-stopped
+volumes:
+  datos:
